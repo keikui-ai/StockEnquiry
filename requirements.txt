@@ -1,0 +1,9 @@
+pandas 
+numpy 
+requests 
+ta-lib 
+beautifulsoup4 
+transformers 
+torch 
+yfinance 
+textblob
