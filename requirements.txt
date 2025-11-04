@@ -2,5 +2,5 @@ streamlit
 pandas
 numpy
 requests
-python-telegram-bot==20.7
+plotly
 python-dotenv
