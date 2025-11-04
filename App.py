@@ -40,6 +40,27 @@ class StockAnalyzer:
     def __init__(self):
         self.sentiment_analyzer = None
         
+    def safe_float_format(self, value, default="N/A"):
+        """Safely format float values with error handling"""
+        try:
+            if value is None or pd.isna(value):
+                return default
+            return f"{float(value):.2f}"
+        except (TypeError, ValueError):
+            return default
+            
+    def safe_get(self, data, key, default=None):
+        """Safely get value from dictionary or series"""
+        try:
+            if isinstance(data, dict):
+                return data.get(key, default)
+            elif hasattr(data, 'get'):
+                return data.get(key, default)
+            else:
+                return getattr(data, key, default)
+        except:
+            return default
+    
     def get_stock_data(self, symbol: str, interval: str, periods: int = 100):
         """Fetch stock data using yfinance"""
         try:
@@ -87,50 +108,88 @@ class StockAnalyzer:
     
     def calculate_technical_indicators(self, df):
         """Calculate technical indicators with error handling"""
-        if df is None or len(df) < 20:
+        if df is None or len(df) < 5:
             return None
             
         try:
-            # RSI
-            if len(df) >= 14:  # RSI requires minimum 14 periods
-                df['rsi'] = ta.momentum.RSIIndicator(df['close']).rsi()
+            # Make a copy to avoid modifying original
+            df = df.copy()
+            
+            # Basic calculations that should always work
+            df['close'] = pd.to_numeric(df['close'], errors='coerce')
+            df['high'] = pd.to_numeric(df['high'], errors='coerce')
+            df['low'] = pd.to_numeric(df['low'], errors='coerce')
+            df['open'] = pd.to_numeric(df['open'], errors='coerce')
+            
+            # Fill NaN values with forward fill
+            df = df.ffill()
+            
+            # RSI with safe calculation
+            if len(df) >= 14:
+                try:
+                    df['rsi'] = ta.momentum.RSIIndicator(df['close']).rsi()
+                except:
+                    df['rsi'] = 50
             else:
-                df['rsi'] = 50  # Default neutral value
+                df['rsi'] = 50
                 
-            # MACD
-            if len(df) >= 26:  # MACD requires minimum 26 periods
-                macd = ta.trend.MACD(df['close'])
-                df['macd'] = macd.macd()
-                df['macd_signal'] = macd.macd_signal()
-                df['macd_histogram'] = macd.macd_diff()
+            # MACD with safe calculation
+            if len(df) >= 26:
+                try:
+                    macd = ta.trend.MACD(df['close'])
+                    df['macd'] = macd.macd()
+                    df['macd_signal'] = macd.macd_signal()
+                    df['macd_histogram'] = macd.macd_diff()
+                except:
+                    df['macd'] = 0
+                    df['macd_signal'] = 0
+                    df['macd_histogram'] = 0
             else:
                 df['macd'] = 0
                 df['macd_signal'] = 0
                 df['macd_histogram'] = 0
             
-            # Bollinger Bands
-            if len(df) >= 20:  # Bollinger Bands require minimum 20 periods
-                bollinger = ta.volatility.BollingerBands(df['close'])
-                df['bb_upper'] = bollinger.bollinger_hband()
-                df['bb_lower'] = bollinger.bollinger_lband()
-                df['bb_middle'] = bollinger.bollinger_mavg()
+            # Bollinger Bands with safe calculation
+            if len(df) >= 20:
+                try:
+                    bollinger = ta.volatility.BollingerBands(df['close'])
+                    df['bb_upper'] = bollinger.bollinger_hband()
+                    df['bb_lower'] = bollinger.bollinger_lband()
+                    df['bb_middle'] = bollinger.bollinger_mavg()
+                except:
+                    df['bb_upper'] = df['close']
+                    df['bb_lower'] = df['close']
+                    df['bb_middle'] = df['close']
             else:
                 df['bb_upper'] = df['close']
                 df['bb_lower'] = df['close']
                 df['bb_middle'] = df['close']
             
-            # Moving Averages
-            df['sma_20'] = ta.trend.SMAIndicator(df['close'], window=min(20, len(df))).sma_indicator()
-            df['ema_12'] = ta.trend.EMAIndicator(df['close'], window=min(12, len(df))).ema_indicator()
-            df['ema_26'] = ta.trend.EMAIndicator(df['close'], window=min(26, len(df))).ema_indicator()
+            # Moving Averages with safe calculation
+            try:
+                df['sma_20'] = ta.trend.SMAIndicator(df['close'], window=min(20, len(df))).sma_indicator()
+            except:
+                df['sma_20'] = df['close']
+                
+            try:
+                df['ema_12'] = ta.trend.EMAIndicator(df['close'], window=min(12, len(df))).ema_indicator()
+            except:
+                df['ema_12'] = df['close']
+                
+            try:
+                df['ema_26'] = ta.trend.EMAIndicator(df['close'], window=min(26, len(df))).ema_indicator()
+            except:
+                df['ema_26'] = df['close']
             
             # Volume indicators
-            df['volume_sma'] = ta.trend.SMAIndicator(df['volume'], window=min(20, len(df))).sma_indicator()
+            try:
+                df['volume_sma'] = ta.trend.SMAIndicator(df['volume'], window=min(20, len(df))).sma_indicator()
+            except:
+                df['volume_sma'] = df['volume']
             
             return df
         except Exception as e:
             st.error(f"Error calculating indicators: {e}")
-            # Return original dataframe if indicator calculation fails
             return df
     
     def analyze_candlestick_patterns(self, df):
@@ -497,15 +556,20 @@ def main():
                 st.error(f"❌ Unable to fetch data for {symbol}. Please check the symbol and try again.")
                 return
             
-            current_price = primary_data.iloc[-1]['close']
+            # Safely get current price
+            try:
+                current_price = float(primary_data.iloc[-1]['close'])
+            except:
+                st.error(f"❌ Error getting current price for {symbol}")
+                return
             
             # Prepare technical data for recommendation
             tech_data = {
                 'current_price': current_price,
-                'rsi': primary_data.iloc[-1].get('rsi', 50),
-                'macd_histogram': primary_data.iloc[-1].get('macd_histogram', 0),
-                'sma_20': primary_data.iloc[-1].get('sma_20', current_price),
-                'volume_ratio': primary_data.iloc[-1]['volume'] / primary_data['volume'].mean() if 'volume' in primary_data else 1,
+                'rsi': st.session_state.analyzer.safe_get(primary_data.iloc[-1], 'rsi', 50),
+                'macd_histogram': st.session_state.analyzer.safe_get(primary_data.iloc[-1], 'macd_histogram', 0),
+                'sma_20': st.session_state.analyzer.safe_get(primary_data.iloc[-1], 'sma_20', current_price),
+                'volume_ratio': st.session_state.analyzer.safe_get(primary_data.iloc[-1], 'volume', 1) / primary_data['volume'].mean() if 'volume' in primary_data else 1,
                 'highs': primary_data['high'].tolist(),
                 'lows': primary_data['low'].tolist(),
                 'closes': primary_data['close'].tolist()
@@ -559,23 +623,32 @@ def main():
             with tech_col1:
                 st.write("**15-minute Chart:**")
                 if primary_data is not None:
-                    rsi_value = primary_data.iloc[-1].get('rsi', 'N/A')
+                    rsi_value = st.session_state.analyzer.safe_get(primary_data.iloc[-1], 'rsi', 'N/A')
                     rsi_comment = ''
-                    if isinstance(rsi_value, (int, float)):
-                        if rsi_value < 30:
+                    
+                    # Safely format RSI value
+                    rsi_display = st.session_state.analyzer.safe_float_format(rsi_value, 'N/A')
+                    if rsi_display != 'N/A':
+                        rsi_num = float(rsi_value)
+                        if rsi_num < 30:
                             rsi_comment = '(Oversold)'
-                        elif rsi_value > 70:
+                        elif rsi_num > 70:
                             rsi_comment = '(Overbought)'
                     
-                    st.write(f"- RSI: {rsi_value:.1f if isinstance(rsi_value, (int, float)) else rsi_value} {rsi_comment}")
-                    st.write(f"- MACD: {primary_data.iloc[-1].get('macd', 0):.3f}")
+                    st.write(f"- RSI: {rsi_display} {rsi_comment}")
+                    
+                    # Safely format MACD
+                    macd_value = st.session_state.analyzer.safe_get(primary_data.iloc[-1], 'macd', 0)
+                    macd_display = st.session_state.analyzer.safe_float_format(macd_value, 'N/A')
+                    st.write(f"- MACD: {macd_display}")
                     st.write(f"- Pattern: {', '.join(patterns_15min)}")
                 
             with tech_col2:
                 st.write("**1-hour Chart:**")
                 if timeframe_data['1h'] is not None:
-                    hourly_rsi = timeframe_data['1h'].iloc[-1].get('rsi', 'N/A')
-                    st.write(f"- RSI: {hourly_rsi:.1f if isinstance(hourly_rsi, (int, float)) else hourly_rsi}")
+                    hourly_rsi = st.session_state.analyzer.safe_get(timeframe_data['1h'].iloc[-1], 'rsi', 'N/A')
+                    hourly_rsi_display = st.session_state.analyzer.safe_float_format(hourly_rsi, 'N/A')
+                    st.write(f"- RSI: {hourly_rsi_display}")
                     st.write(f"- Pattern: {', '.join(patterns_1h)}")
             
             # Market Sentiment
