@@ -1,11 +1,7 @@
-python-telegram-bot
-pandas 
-numpy 
-requests 
-ta
-beautifulsoup4 
-transformers 
-torch 
-yfinance 
-textblob
 streamlit
+pandas
+numpy
+requests
+yfinance
+ta
+textblob
